@@ -10,6 +10,7 @@ load_dotenv()
 # API configuration
 TEAMS_API_URL = "https://api.sportradar.com/mlb/trial/v8/en/league/teams.json"
 STATS_API_URL = "https://api.sportradar.com/mlb/trial/v8/en/seasons/2025/REG/teams/{team_id}/statistics.json"
+SCHEDULE_API_URL = "https://api.sportradar.com/mlb/trial/v8/en/games/2025/REG/schedule.json"
 API_KEY = os.getenv("SPORTRADAR_API_KEY")
 if not API_KEY:
     raise ValueError("API key not found. Please set SPORTRADAR_API_KEY environment variable or create a .env file with SPORTRADAR_API_KEY.")
@@ -47,6 +48,23 @@ def setup_database():
             )
         ''')
         
+        print("Creating schedule table...")
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS schedule (
+                game_id TEXT PRIMARY KEY,
+                date TEXT,
+                scheduled_time TEXT,
+                home_team_id TEXT,
+                away_team_id TEXT,
+                venue_name TEXT,
+                home_team_abbr TEXT,
+                away_team_abbr TEXT,
+                status TEXT,
+                FOREIGN KEY (home_team_id) REFERENCES teams(id),
+                FOREIGN KEY (away_team_id) REFERENCES teams(id)
+            )
+        ''')
+        
         conn.commit()
         print("Database setup completed successfully")
     except sqlite3.Error as e:
@@ -66,7 +84,6 @@ def populate_teams():
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        # Track processed team IDs to avoid duplicates
         processed_team_ids = set()
         
         for team in data.get("teams", []):
@@ -140,10 +157,58 @@ def populate_statistics():
         finally:
             conn.close()
 
+# Populate schedule
+def populate_schedule():
+    url = SCHEDULE_API_URL + f"?api_key={API_KEY}"
+    try:
+        response = requests.get(url, timeout=10)
+        print(f"Fetching schedule, Status Code: {response.status_code}")
+        response.raise_for_status()
+        data = response.json()
+        
+        print("Schedule API Response Structure:", json.dumps(data, indent=2))
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Extract date from first game's scheduled as fallback
+        schedule_date = data.get("games", [{}])[0].get("scheduled", "2025-06-23")[:10] if data.get("games") else "2025-06-23"
+        
+        for game in data.get("games", []):
+            game_data = {
+                "game_id": game["id"],
+                "date": schedule_date,
+                "scheduled_time": game["scheduled"],
+                "home_team_id": game["home"]["id"],
+                "away_team_id": game["away"]["id"],
+                "venue_name": game["venue"]["name"],
+                "home_team_abbr": game["home"]["abbr"],
+                "away_team_abbr": game["away"]["abbr"],
+                "status": game["status"]
+            }
+            cursor.execute('''
+                INSERT OR REPLACE INTO schedule (game_id, date, scheduled_time, home_team_id, away_team_id, venue_name, home_team_abbr, away_team_abbr, status)
+                VALUES (:game_id, :date, :scheduled_time, :home_team_id, :away_team_id, :venue_name, :home_team_abbr, :away_team_abbr, :status)
+            ''', game_data)
+        
+        conn.commit()
+        print("Successfully imported schedule")
+    except requests.RequestException as e:
+        print(f"API request failed for schedule: {e}")
+    except ValueError as e:
+        print(f"JSON decode error for schedule: {e}")
+    except KeyError as e:
+        print(f"KeyError for schedule: {e}")
+    except Exception as e:
+        print(f"Unexpected error for schedule: {e}")
+    finally:
+        conn.close()
+
 def main():
     setup_database()
     populate_teams()
     populate_statistics()
+    populate_schedule()
 
 if __name__ == "__main__":
     main()
