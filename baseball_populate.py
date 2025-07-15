@@ -41,14 +41,42 @@ def setup_database():
     ''')
     
     # Table 2: Teams
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS teams (
-            id TEXT PRIMARY KEY,
-            name TEXT,
-            market TEXT,
-            abbr TEXT
-        )
-    ''')
+def populate_teams():
+    url = TEAMS_API_URL + f"?api_key={API_KEY}"
+    try:
+        response = requests.get(url, timeout=10)
+        print(f"Fetching teams, Status Code: {response.status_code}")
+        response.raise_for_status()
+        data = response.json()
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        for team in data.get("teams", []):
+            # Only process teams with a market (filter out leagues/divisions)
+            if "market" in team:
+                team_data = {
+                    "id": team["id"],
+                    "name": team["name"],
+                    "market": team["market"],
+                    "abbr": team["abbr"]
+                }
+                cursor.execute('''
+                    INSERT OR REPLACE INTO teams (id, name, market, abbr)
+                    VALUES (:id, :name, :market, :abbr)
+                ''', team_data)
+            else:
+                print(f"Skipping team {team['name']} (ID: {team['id']}) due to missing market")
+        
+        conn.commit()
+        conn.close()
+        print("Successfully imported teams")
+    except requests.RequestException as e:
+        print(f"API request failed for teams: {e}")
+    except ValueError as e:
+        print(f"JSON decode error for teams: {e}")
+    except KeyError as e:
+        print(f"KeyError for teams: {e}")
     
     # Table 3: Statistics
     cursor.execute('''
