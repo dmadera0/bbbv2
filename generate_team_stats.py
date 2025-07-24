@@ -1,43 +1,51 @@
-# generate_team_stats.py
-# Fetches live MLB team stats and saves to team_stats.csv
+# generate_team_stats.py (Selenium Version)
+# Scrapes MLB team batting and pitching stats from https://www.mlb.com/stats/team using Selenium and saves to team_stats.csv
 
-import requests
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
 import pandas as pd
+import time
+from sklearn.preprocessing import MinMaxScaler
 
-# API endpoint for team stats
-API_URL = "https://statsapi.mlb.com/api/v1/teams/stats"
-params = {
-    "leagueId": "103,104",  # American & National Leagues
-    "season": "2024",       # Change to 2025 if season is ongoing
-    "group": "hitting,pitching",
-    "stats": "season"
-}
+# ----------------------
+# Configure Selenium
+# ----------------------
+options = Options()
+options.add_argument("--headless")  # run Chrome in background
+options.add_argument("--no-sandbox")
+options.add_argument("--disable-dev-shm-usage")
+driver = webdriver.Chrome(options=options)
 
-response = requests.get(API_URL, params=params)
-data = response.json()
+# ----------------------
+# Navigate to Batting Stats Page
+# ----------------------
+batting_url = "https://www.mlb.com/stats/team"
+print(f"Loading page: {batting_url}")
+driver.get(batting_url)
+time.sleep(5)  # Wait for JavaScript to load table
 
-teams = []
-for team in data["stats"][0]["splits"]:
-    team_name = team["team"]["name"]
-    hitting = team["stat"]
-    teams.append({
-        "Team": team_name,
-        "AVG": float(hitting.get("avg", 0)),
-        "OBP": float(hitting.get("obp", 0)),
-        "RunsPerGame": float(hitting.get("runsPerGame", 0))
-    })
+# ----------------------
+# Parse Batting Table
+# ----------------------
+print("Extracting batting table...")
+table = driver.find_element(By.CSS_SELECTOR, "table")
+rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
 
-# Now fetch pitching stats from the second stat block
-for team in data["stats"][1]["splits"]:
-    team_name = team["team"]["name"]
-    pitching = team["stat"]
-    for row in teams:
-        if row["Team"] == team_name:
-            row["ERA"] = float(pitching.get("era", 0))
-            row["WHIP"] = float(pitching.get("whip", 0))
+batting_columns = [
+    "Team", "AVG", "OBP", "SLG", "OPS", "HR", "BB", "SO", "R", "AB", "H"
+]
+batting_data = []
 
-# Save to CSV
-df = pd.DataFrame(teams)
-df = df.set_index("Team").sort_index()
-df.to_csv("team_stats.csv")
-print("✅ Saved team_stats.csv")
+for row in rows:
+    cells = row.find_elements(By.TAG_NAME, "td")
+    if len(cells) >= 11:
+        team_data = [cell.text for cell in cells[:11]]
+        batting_data.append(team_data)
+
+batting_df = pd.DataFrame(batting_data, columns=batting_columns)
+
+# ----------------------
+# Navigate to Pitching Stats Page
+# ----------------------
+pitching_url = "https://www.mlb.com/stats/team/pitching"
