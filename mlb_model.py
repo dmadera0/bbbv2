@@ -9,6 +9,7 @@ import os
 import json
 from datetime import date, datetime, timedelta
 from joblib import load  # For loading trained model
+import pytz  # NEW: For timezone conversion
 
 # -----------------------------
 # CONFIG
@@ -16,6 +17,7 @@ from joblib import load  # For loading trained model
 CACHE_FILE = "mlb_games_cache.json"  # File to cache daily game data
 HISTORY_FILE = "mlb_prediction_history.csv"  # File to store past predictions and outcomes
 MLB_API_SCHEDULE = "https://statsapi.mlb.com/api/v1/schedule"  # API endpoint for schedule info
+LAS_VEGAS_TZ = pytz.timezone("America/Los_Angeles")  # Las Vegas local time (Pacific Time)
 
 # -----------------------------
 # DATA FETCHING & CACHING
@@ -57,22 +59,28 @@ def extract_game_data(schedule_json):
     return pd.DataFrame(games)
 
 def load_games_data():
-    """Loads today's and tomorrow's games, using cache if available, otherwise fetches from API."""
+    """Loads yesterday's, today's, and tomorrow's games using cache if available, otherwise fetches from API."""
     today = date.today()
+    yesterday = today - timedelta(days=1)
     tomorrow = today + timedelta(days=1)
+
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, 'r') as f:
             cache = json.load(f)
         if cache.get("fetched_date") == str(today):
             return pd.DataFrame(cache["games"])
 
-    schedule = fetch_schedule(today.isoformat(), tomorrow.isoformat())
+    # Fetch from MLB API
+    schedule = fetch_schedule(yesterday.isoformat(), tomorrow.isoformat())
     games_df = extract_game_data(schedule)
+
+    # Cache the results
     with open(CACHE_FILE, 'w') as f:
         json.dump({
             "fetched_date": str(today),
             "games": games_df.to_dict(orient="records")
         }, f)
+
     return games_df
 
 # -----------------------------
@@ -116,12 +124,15 @@ def add_real_predictions(df):
 
 def get_game_insight(row):
     """Creates detailed markdown for game insight."""
-    game_time = pd.to_datetime(row['Date']).strftime('%Y-%m-%d %I:%M %p')
-    final_score = f" ({row['Away Score']} - {row['Home Score']})" if row['Status'] == 'Final' else ""
+    utc_time = pd.to_datetime(row['Date']).tz_localize('UTC') if pd.to_datetime(row['Date']).tzinfo is None else pd.to_datetime(row['Date'])
+    local_time = utc_time.astimezone(LAS_VEGAS_TZ)
+    game_time = local_time.strftime('%Y-%m-%d %I:%M %p')
+    status = row.get('Status', 'Unknown') if isinstance(row, dict) else row.get('Status', default='Unknown')
+    final_score = f" ({row['Away Score']} - {row['Home Score']})" if status == 'Final' else ""
     winner = row['Prediction'] + final_score
     confidence = row['Prob Home Win'] if row['Prediction'] == row['Home Team'] else 1 - row['Prob Home Win']
 
-    return f"**Start Time:** {game_time}\n\n" \
+    return f"**Start Time:** {game_time} PT\n\n" \
            f"**Prediction:** {winner}\n\n" \
            f"**Confidence:** {confidence:.0%}\n\n" \
            f"**Expected Total Runs:** {row['Total Runs']:.1f}\n\n" \
