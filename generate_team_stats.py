@@ -13,11 +13,12 @@ import time
 # Configure Selenium Chrome Driver
 # ----------------------
 options = Options()
-# options.add_argument("--headless")  # Temporarily disable headless mode for debugging
+options.add_argument("--headless")  # Re-enabled headless mode for cron compatibility
 options.add_argument("--no-sandbox")
 options.add_argument("--disable-dev-shm-usage")
+options.add_argument("user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
 
-# Start the Chrome WebDriver with the configured options
+# Start the Chrome WebDriver with the configured options and debug log
 driver = webdriver.Chrome(options=options)
 
 # ----------------------
